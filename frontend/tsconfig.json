@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals", "node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+    "allowJs": true,          // keep your .js/.jsx files
+    "checkJs": false,         // flip to true later if you want js type-checking
+    "strict": false           // tighten over time
+  },
+  "include": ["src"]
+}

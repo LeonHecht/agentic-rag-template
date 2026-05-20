@@ -1,0 +1,58 @@
+from pydantic import BaseModel, Field
+from typing import List
+
+
+class SearchRequest(BaseModel):
+    """Parameters for a search request."""
+    query: str
+    top_k: int = 30
+    use_transformer: bool = False
+
+
+class SearchResult(BaseModel):
+    """A single search hit."""
+    id: str
+    score: float
+    title: str | None = Field(default=None)   # <- allow None
+    snippet: str | None = None
+    download_url: str | None = None
+
+
+class SearchResponse(BaseModel):
+    """
+    Response for `/search`.
+
+    Parameters
+    ----------
+    query_log_id : int
+        The ID of the logged query in the database.
+    results : List[SearchResult]
+        The list of retrieved documents.
+    """
+    query_log_id: int = Field(..., description="ID of the QueryLog entry")
+    results: List[SearchResult] = Field(..., description="Retrieved documents")
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    token: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    first_name: str
+    last_name: str
+
+
+class UserInfo(BaseModel):
+    username: str
+    first_name: str
+    last_name: str
+
+class SpaceCreateRequest(BaseModel):
+    name: str
