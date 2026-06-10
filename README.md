@@ -117,7 +117,7 @@ Install backend dependencies from the repo root or backend directory:
 pip install -r backend/requirements.txt
 ```
 
-CSV uploads through the existing upload endpoint are still saved and indexed as documents. If a `.csv` matches a known analytics shape, it is also loaded into DuckDB.
+CSV uploads through the existing upload endpoint are still saved and indexed as documents. If a `.csv` matches a known analytics shape, it is also loaded into DuckDB. The endpoint also accepts one `.xlsx` or `.xlsm` workbook per request; each worksheet is converted into a generated CSV in the selected upload space and loaded through the same DuckDB path. Requests that mix Excel with other files, or include multiple Excel workbooks, are rejected.
 
 Supported generic CSV shapes:
 
