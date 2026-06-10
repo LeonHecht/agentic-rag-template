@@ -5,6 +5,9 @@ import os
 import asyncio
 from types import SimpleNamespace
 
+from fastapi import HTTPException
+import pandas as pd
+
 # Load the .env file from project root (2 levels up from /backend/tests)
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
@@ -117,6 +120,101 @@ def test_file_upload_creates_file_and_indexes(test_env, monkeypatch):
     path = Path(settings.DATA_UPLOAD) / "alice" / "personal" / saved
     assert path.exists()
     assert indexed == ["alice/personal"]
+
+
+def test_csv_upload_preserves_existing_analytics_loader_behavior(test_env, monkeypatch):
+    user = test_env
+    uploaded = UploadFile(filename="metrics.csv", file=io.BytesIO(b"COUNTRY,CITY\nCO,Bogota\n"))
+    loaded_paths = []
+    indexed = []
+
+    def fake_load_csv_to_duckdb(path):
+        loaded_paths.append(Path(path))
+        return {"loaded": True, "dataset": "metrics"}
+
+    monkeypatch.setattr(files_ep, "load_csv_to_duckdb", fake_load_csv_to_duckdb)
+    monkeypatch.setattr(search_engine, "index", lambda space: indexed.append(space))
+
+    resp = asyncio.run(files_ep.upload_file(files=[uploaded], space="alice/personal", user=user))
+
+    saved_path = Path(settings.DATA_UPLOAD) / "alice" / "personal" / resp["uploaded"][0]["saved_path"]
+    assert saved_path.exists()
+    assert loaded_paths == [saved_path]
+    assert resp["converted"] == []
+    assert resp["analytics"] == [{
+        "loaded": True,
+        "dataset": "metrics",
+        "filename": "metrics.csv",
+        "saved_path": saved_path.name,
+    }]
+    assert indexed == ["alice/personal"]
+
+
+def test_excel_upload_converts_each_sheet_and_loads_generated_csvs(test_env, monkeypatch):
+    user = test_env
+    workbook = io.BytesIO()
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        pd.DataFrame({"COUNTRY": ["CO"], "CITY": ["Bogota"]}).to_excel(
+            writer,
+            sheet_name="Metrics 2026!",
+            index=False,
+        )
+        pd.DataFrame({"COUNTRY": ["MX"], "CITY": ["CDMX"]}).to_excel(
+            writer,
+            sheet_name="Orders Raw #",
+            index=False,
+        )
+    workbook.seek(0)
+    uploaded = UploadFile(filename="source.xlsx", file=workbook)
+    loaded_paths = []
+    indexed = []
+
+    def fake_load_csv_to_duckdb(path):
+        loaded_paths.append(Path(path))
+        return {"loaded": True}
+
+    monkeypatch.setattr(files_ep, "load_csv_to_duckdb", fake_load_csv_to_duckdb)
+    monkeypatch.setattr(search_engine, "index", lambda space: indexed.append(space))
+
+    resp = asyncio.run(files_ep.upload_file(files=[uploaded], space="alice/personal", user=user))
+
+    space_dir = Path(settings.DATA_UPLOAD) / "alice" / "personal"
+    assert len(resp["uploaded"]) == 1
+    assert len(resp["converted"]) == 2
+    assert len(resp["analytics"]) == 2
+    assert [item["sheet"] for item in resp["converted"]] == ["Metrics 2026!", "Orders Raw #"]
+    assert all(Path(item["saved_path"]).suffix == ".csv" for item in resp["converted"])
+    assert all((space_dir / item["saved_path"]).exists() for item in resp["converted"])
+    assert all(item["source_workbook"] == "source.xlsx" for item in resp["analytics"])
+    assert [path.name for path in loaded_paths] == [item["saved_path"] for item in resp["converted"]]
+    converted_names = [item["saved_path"] for item in resp["converted"]]
+    assert any(name.endswith("__Metrics_2026.csv") for name in converted_names)
+    assert any(name.endswith("__Orders_Raw.csv") for name in converted_names)
+    assert indexed == ["alice/personal"]
+
+
+def test_upload_rejects_mixed_excel_and_other_files(test_env):
+    user = test_env
+    workbook = UploadFile(filename="source.xlsx", file=io.BytesIO(b"not read"))
+    csv = UploadFile(filename="metrics.csv", file=io.BytesIO(b"a,b\n1,2\n"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(files_ep.upload_file(files=[workbook, csv], space="alice/personal", user=user))
+
+    assert exc_info.value.status_code == 400
+    assert "Upload either CSV files or one Excel workbook" in exc_info.value.detail
+
+
+def test_upload_rejects_multiple_excel_files(test_env):
+    user = test_env
+    first = UploadFile(filename="first.xlsx", file=io.BytesIO(b"not read"))
+    second = UploadFile(filename="second.xlsm", file=io.BytesIO(b"not read"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(files_ep.upload_file(files=[first, second], space="alice/personal", user=user))
+
+    assert exc_info.value.status_code == 400
+    assert "Only one Excel workbook" in exc_info.value.detail
 
 
 def test_stream_emits_progress_before_tool_execution(monkeypatch):
